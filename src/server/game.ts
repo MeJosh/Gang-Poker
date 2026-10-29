@@ -12,7 +12,7 @@ export class Game {
   revision = 0;
   transitionAt = 0;
   leases = new Map<number, number>();
-  constructor(public maxPlayers = 6) {
+  constructor(public maxPlayers = 6, public debugReady = false) {
     if (!Number.isInteger(maxPlayers) || maxPlayers < 3 || maxPlayers > 10) throw new Error('MAX_PLAYERS must be an integer from 3 to 10');
     this.shuffle();
   }
@@ -102,15 +102,25 @@ export class Game {
     }
   }
   action(id: string, action: Action, now = Date.now()) {
+    if (action.type === 'debug-reset') {
+      if (!this.debugReady || !this.members.get(id)?.connected) return;
+      this.reset(); this.revision++; return;
+    }
+    if (action.type === 'debug-ready') {
+      if (!this.debugReady || !this.members.get(id)?.connected || this.phase !== 'playing') return;
+      const target = this.players.find(p => p.id === action.player);
+      if (!target) return;
+      const owned = this.chips.filter(chip => areaFor(chip, this.players) === target.id);
+      target.readyChip = target.readyChip === null && owned.length === 1 ? owned[0].id : null;
+      this.invalidateReady(); this.maybeAdvance(now); this.revision++; return;
+    }
     if (action.type === 'leave') { this.leave(id); this.revision++; return; }
     if (action.type === 'sit') { this.sit(id); this.revision++; return; }
     const player = this.players.find(p => p.id === id);
     if (!player || !player.connected) return;
     if (action.type === 'again') {
       if (this.phase !== 'reveal') return;
-      this.stage = 0; this.phase = 'playing'; this.board = []; this.shuffle(); this.leases.clear();
-      for (const p of this.players) { p.cards = [this.deck.pop()!, this.deck.pop()!]; p.history = []; p.readyChip = null; }
-      this.freshChips(); this.revision++; return;
+      this.reset(); this.revision++; return;
     }
     if (this.phase !== 'playing') return;
     const chip = 'chip' in action ? this.chips.find(c => c.id === action.chip) : undefined;
@@ -129,6 +139,14 @@ export class Game {
       player.readyChip = action.value && owned.length === 1 ? owned[0].id : null;
     } else return;
     this.invalidateReady(); this.maybeAdvance(now); this.revision++;
+  }
+  reset() {
+    this.stage = 0; this.phase = 'playing'; this.board = []; this.transitionAt = 0;
+    this.shuffle(); this.leases.clear();
+    for (const player of this.players) {
+      player.cards = [this.deck.pop()!, this.deck.pop()!]; player.history = []; player.readyChip = null;
+    }
+    this.freshChips();
   }
   maybeAdvance(now: number) {
     if (this.phase !== 'playing' || this.players.length < 3 || this.chips.some(c => c.holder)) return;
@@ -166,7 +184,7 @@ export class Game {
       players: this.players.map(p => ({ ...p, cards: p.id === id || this.phase === 'reveal' ? [...p.cards] : ['??', '??'], history: [...p.history] })),
       chips: this.chips.map(c => ({ ...c })), board: [...this.board],
       spectators: [...this.members.values()].filter(m => m.connected && !this.players.some(p => p.id === m.id)).length,
-      selfId: id, canSit: this.canSit() && !this.players.some(p => p.id === id),
+      selfId: id, canSit: this.canSit() && !this.players.some(p => p.id === id), debugReady: this.debugReady,
     };
   }
 }

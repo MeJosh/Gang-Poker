@@ -12,13 +12,15 @@ export interface Player {
 export interface Snapshot {
   revision: number; stage: number; phase: Phase; maxPlayers: number;
   players: Player[]; chips: Chip[]; board: Card[]; spectators: number;
-  selfId: string; canSit: boolean;
+  selfId: string; canSit: boolean; debugReady: boolean;
 }
 export type Action =
   | { type: 'grab'; chip: number }
   | { type: 'move'; chip: number; x: number; z: number }
   | { type: 'release'; chip: number }
   | { type: 'ready'; value: boolean }
+  | { type: 'debug-ready'; player: string }
+  | { type: 'debug-reset' }
   | { type: 'again' }
   | { type: 'sit' }
   | { type: 'leave' };

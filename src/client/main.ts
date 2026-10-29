@@ -27,6 +27,7 @@ function online(value: boolean, message?: string) {
   el('connection').textContent = message || (value ? 'At the table' : 'Reconnecting…');
   readyButton.disabled = !value || readyButton.disabled;
   el<HTMLButtonElement>('again').disabled = !value;
+  el<HTMLButtonElement>('debug-reset').disabled = !value;
 }
 function connect() {
   clearTimeout(reconnectTimer);
@@ -84,6 +85,7 @@ document.addEventListener('keydown', event => {
   if (!event.repeat) readyButton.click();
 });
 el('again').onclick = () => send({ type: 'again' });
+el('debug-reset').onclick = () => { cancelDrag(); send({ type: 'debug-reset' }); };
 el('sit').onclick = () => send({ type: 'sit' });
 el('leave').onclick = () => { cancelDrag(); send({ type: 'leave' }); };
 setInterval(() => { send({ type: 'ping' }); if (dragging) send({ type: 'move', chip: dragging.id, ...dragging.point }); }, 3000);
@@ -97,6 +99,7 @@ function cardElement(card: string) {
   const suit = document.createElement('span'); suit.textContent = suits[card[1]]; node.append(suit);
   node.setAttribute('aria-label', `${node.firstChild!.textContent} ${suits[card[1]]}`); return node;
 }
+let playerBadgeSignature = '';
 function updateUI() {
   if (!state) return;
   const self = state.players.find(p => p.id === state!.selfId);
@@ -104,13 +107,33 @@ function updateUI() {
   const owned = state.chips.filter(c => areaFor(c, state!.players) === state!.selfId);
   const connected = socket?.readyState === WebSocket.OPEN;
   const finished = state.phase === 'reveal';
+  el<HTMLButtonElement>('debug-reset').hidden = !state.debugReady;
+  el<HTMLButtonElement>('debug-reset').disabled = !connected;
   el('stage-track').replaceChildren(...STAGES.map((stage, i) => {
     const node = document.createElement('div'); node.className = `stage-step ${i === state!.stage ? 'active' : ''} ${i < state!.stage || finished ? 'done' : ''}`;
     node.style.setProperty('--stage', STAGE_COLORS[i]); const dot = document.createElement('i'); node.append(dot, stage); return node;
   }));
   el('hand').replaceChildren(...(self?.cards || []).map(cardElement));
+  const badgeSignature = JSON.stringify([state.debugReady, connected, state.phase, state.selfId, state.players.map(player => [player.id, player.name, player.seat, player.connected, player.readyChip])]);
+  if (badgeSignature !== playerBadgeSignature) {
+  playerBadgeSignature = badgeSignature;
   el('players').replaceChildren(...state.players.map(player => {
-    const badge = document.createElement('div'); badge.className = 'player-chip'; badge.setAttribute('role', 'listitem');
+    const item = document.createElement('div'); item.setAttribute('role', 'listitem');
+    const badge = document.createElement(state!.debugReady ? 'button' : 'div'); badge.className = 'player-chip';
+    if (badge instanceof HTMLButtonElement) {
+      badge.type = 'button';
+      badge.disabled = !connected || state!.phase !== 'playing';
+      badge.setAttribute('aria-pressed', String(player.readyChip !== null));
+      badge.onclick = () => {
+        const target = state?.players.find(p => p.id === player.id);
+        if (!target || !state) return;
+        const areaChips = state.chips.filter(chip => areaFor(chip, state!.players) === target.id);
+        if (target.readyChip === null && areaChips.length !== 1) {
+          toast(`Put exactly one chip in ${target.name}’s circle to ready them.`); return;
+        }
+        send({ type: 'debug-ready', player: target.id });
+      };
+    }
     badge.style.setProperty('--player-color', SEAT_COLORS[player.seat % SEAT_COLORS.length]);
     const name = document.createElement('span'); name.className = 'player-name';
     name.textContent = player.name;
@@ -119,15 +142,15 @@ function updateUI() {
     check.setAttribute('aria-hidden', 'true'); check.style.visibility = player.readyChip !== null ? 'visible' : 'hidden'; badge.append(check);
     badge.classList.toggle('offline', !player.connected);
     badge.setAttribute('aria-label', `${player.name}${player.id === state!.selfId ? ', you' : ''}, ${!player.connected ? 'offline' : player.readyChip !== null ? 'ready' : 'not ready'}`);
-    badge.title = badge.getAttribute('aria-label')!;
-    return badge;
+    badge.title = `${state!.debugReady ? 'Debug: toggle ready · ' : ''}${badge.getAttribute('aria-label')!}`;
+    item.append(badge); return item;
   }));
+  }
   el('hand-label').textContent = self ? finished ? 'YOUR REVEALED HAND' : 'YOUR PRIVATE HAND' : 'SPECTATOR';
   el('spectating').hidden = !!self;
   el<HTMLButtonElement>('sit').hidden = !state.canSit;
   el<HTMLButtonElement>('leave').hidden = !self || state.stage !== 0 || state.phase !== 'playing';
   el<HTMLButtonElement>('leave').disabled = !connected;
-  el('instruction-detail').textContent = finished ? 'Your river chips are your final ranking.' : `1 = weakest · ${state.players.length || 'N'} = strongest · Move any released chip`;
   el('ready-count').textContent = finished ? `${state.players.length} players · ${state.spectators} watching` : `${count} / ${state.players.length} ready${state.players.some(p => !p.connected) ? ' · Waiting for a connection' : ''}`;
   readyButton.hidden = finished || !self;
   readyButton.disabled = !connected || state.phase !== 'playing' || owned.length !== 1;
@@ -157,6 +180,14 @@ const staticGroup = new THREE.Group(); scene.add(staticGroup);
 const chipGroup = new THREE.Group(); scene.add(chipGroup);
 const chipMeshes = new Map<number, THREE.Group>();
 let sceneSignature = '';
+const readyFades = new Map<string, { from: number; to: number; started: number }>();
+function readyGlowLevel(id: string, now: number) {
+  const fade = readyFades.get(id);
+  if (!fade) return 0;
+  const progress = reducedMotion ? 1 : Math.min(1, Math.max(0, (now - fade.started) / 180));
+  const eased = progress * progress * (3 - 2 * progress);
+  return THREE.MathUtils.lerp(fade.from, fade.to, eased);
+}
 function disposeGroup(group: THREE.Group) {
   group.traverse(object => {
     if (object instanceof THREE.Mesh || object instanceof THREE.Sprite) {
@@ -246,6 +277,15 @@ function nearestAngle(from: number, to: number) {
 }
 function updateScene(previous: Snapshot | null) {
   if (!state) return;
+  const now = performance.now();
+  for (const player of state.players) {
+    const target = player.readyChip !== null ? 1 : 0;
+    const fade = readyFades.get(player.id);
+    if (!fade || fade.to !== target) {
+      readyFades.set(player.id, { from: fade ? readyGlowLevel(player.id, now) : target, to: target, started: now });
+    }
+  }
+  for (const id of readyFades.keys()) if (!state.players.some(player => player.id === id)) readyFades.delete(id);
   const self = state.players.find(p => p.id === state!.selfId);
   const targetView = (self?.seat ?? 0) * Math.PI * 2 / Math.max(1, state.players.length);
   const layoutChanged = previous && JSON.stringify(previous.players.map(p => [p.id, p.seat])) !== JSON.stringify(state.players.map(p => [p.id, p.seat]));
@@ -281,12 +321,13 @@ function updateScene(previous: Snapshot | null) {
       const i = player.seat;
       const point = seatPoint(i, state.players.length); const angle = i * Math.PI * 2 / state.players.length;
       const color = SEAT_COLORS[i % SEAT_COLORS.length];
-      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: player.readyChip != null ? .95 : .7, side: THREE.DoubleSide }));
+      const glowLevel = readyGlowLevel(player.id, now);
+      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .7 + .25 * glowLevel, side: THREE.DoubleSide }));
+      zone.name = 'ready-ring';
       zone.rotation.x = -Math.PI / 2; zone.position.set(point.x, -.055, point.z); seatGroup.add(zone);
       const inside = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .045 })); inside.rotation.x = -Math.PI / 2; inside.position.set(point.x, -.06, point.z); seatGroup.add(inside);
-      if (player.readyChip != null) {
-        const glow = readyAreaGlow(color); glow.position.set(point.x, -.05, point.z); seatGroup.add(glow);
-      }
+      const glow = readyAreaGlow(color); glow.name = 'ready-glow'; glow.material.opacity = .4 * glowLevel;
+      glow.position.set(point.x, -.05, point.z); seatGroup.add(glow);
       player.history.forEach((id, stage) => {
         const history = makeChip(id, stage, true); const center = seatPoint(i, state!.players.length, 5.08); const offset = (stage - 1.5) * .5;
         history.position.set(center.x + Math.cos(angle) * offset, .1, center.z - Math.sin(angle) * offset);
@@ -428,6 +469,13 @@ function animate(now: number) {
     if (object.userData.playerId && state) {
       const player = state.players.find(p => p.id === object.userData.playerId);
       if (player) object.rotation.y = (seatAngles.get(player.id) ?? 0) - player.seat * Math.PI * 2 / state.players.length;
+      const level = readyGlowLevel(object.userData.playerId, now);
+      for (const child of object.children) {
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshBasicMaterial) {
+          if (child.name === 'ready-glow') child.material.opacity = .4 * level;
+          if (child.name === 'ready-ring') child.material.opacity = .7 + .25 * level;
+        }
+      }
     }
     if (object.userData.boardOffset !== undefined) {
       const offset = object.userData.boardOffset;

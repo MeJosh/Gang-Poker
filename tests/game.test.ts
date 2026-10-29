@@ -158,3 +158,54 @@ describe('cooperative game rules', () => {
     game.action(ids[0], { type: 'move', chip: 1, x: 1e9, z: 1e9 }); expect(Math.hypot(game.chips[0].x, game.chips[0].z)).toBeCloseTo(5.6);
   });
 });
+
+describe('debug readiness', () => {
+  test('is disabled by default, even for forged actions', () => {
+    const { game, ids } = table(); place(game, ids[0], 1, ids[1]);
+    game.action(ids[0], { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBeNull(); expect(game.snapshot(ids[0]).debugReady).toBe(false);
+  });
+  test('allows connected members to toggle another player while preserving chip rules', () => {
+    const game = new Game(6, true);
+    const ids = Array.from({ length: 3 }, (_, i) => game.join(`Player ${i}`, null, false).member.id);
+    const watcher = game.join('Debug watcher', null, true).member.id;
+    expect(game.snapshot(watcher).debugReady).toBe(true);
+    game.action(watcher, { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBeNull();
+    place(game, ids[0], 1, ids[1]);
+    game.action('unknown', { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBeNull();
+    game.action(watcher, { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBe(1);
+    game.action(watcher, { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBeNull();
+    place(game, ids[0], 2, ids[1]);
+    game.action(watcher, { type: 'debug-ready', player: ids[1] });
+    expect(game.players[1].readyChip).toBeNull();
+    ids.forEach((id, i) => place(game, ids[0], i + 1, id));
+    ids.forEach(id => game.action(watcher, { type: 'debug-ready', player: id }, 100));
+    expect(game.phase).toBe('transition');
+    game.action(watcher, { type: 'debug-ready', player: ids[0] });
+    expect(game.players[0].readyChip).toBeNull();
+  });
+});
+
+test('debug reset is gated and restarts during a transition without changing seats', () => {
+  const { game, ids } = table(); rankAll(game, ids, 100);
+  const revision = game.revision;
+  game.action(ids[0], { type: 'debug-reset' });
+  expect(game.phase).toBe('transition'); expect(game.revision).toBe(revision);
+  game.debugReady = true;
+  const spectator = game.join('Debugger', null, true).member.id;
+  game.action('unknown', { type: 'debug-reset' }); expect(game.phase).toBe('transition');
+  game.action(spectator, { type: 'debug-reset' });
+  expect(game.phase).toBe('playing'); expect(game.stage).toBe(0); expect(game.board).toEqual([]);
+  expect(game.players.map(p => p.id)).toEqual(ids);
+  expect(game.players.every(p => p.readyChip === null && p.history.length === 0)).toBe(true);
+  expect(new Set(game.players.flatMap(p => p.cards)).size).toBe(6);
+  expect(game.chips.map(c => c.id)).toEqual([1, 2, 3]); expect(game.leases.size).toBe(0);
+  game.tick(10000); expect(game.stage).toBe(0); expect(game.canSit()).toBe(true);
+  game.action(ids[0], { type: 'grab', chip: 1 });
+  game.action(spectator, { type: 'debug-reset' });
+  expect(game.chips.every(chip => chip.holder === null)).toBe(true); expect(game.leases.size).toBe(0);
+});

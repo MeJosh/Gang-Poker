@@ -3,7 +3,7 @@ import type { Action } from '../shared/types';
 import type { ServerWebSocket } from 'bun';
 import { resolve } from 'node:path';
 
-const game = new Game(Number(process.env.MAX_PLAYERS ?? 6));
+const game = new Game(Number(process.env.MAX_PLAYERS ?? 6), process.env.DEBUG_READY === 'true');
 const connections = new Map<string, ServerWebSocket<Connection>>();
 interface Connection { id: string | null; lastSeen: number; windowAt: number; count: number }
 const publicDir = resolve(import.meta.dir, '../../public');
@@ -14,7 +14,8 @@ if (process.env.NODE_ENV !== 'production') {
 function validAction(value: unknown): value is Action {
   if (!value || typeof value !== 'object') return false;
   const a = value as Record<string, unknown>;
-  if (a.type === 'again' || a.type === 'sit' || a.type === 'leave') return true;
+  if (a.type === 'debug-ready') return typeof a.player === 'string' && a.player.length <= 64;
+  if (a.type === 'again' || a.type === 'sit' || a.type === 'leave' || a.type === 'debug-reset') return true;
   if (a.type === 'ready') return typeof a.value === 'boolean';
   if (!Number.isInteger(a.chip) || Number(a.chip) < 1 || Number(a.chip) > game.maxPlayers) return false;
   if (a.type === 'grab' || a.type === 'release') return true;

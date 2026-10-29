@@ -67,3 +67,7 @@ The server decides drag ownership, positions, readiness, and transitions. Local 
 - [docs/mvp.md](docs/mvp.md): agreed MVP scope and deferred work.
 
 Deferred: multiple rooms, persistent recovery, replacing absent players, scoring, history infographics, refined animations, and chip physics. The reveal and Play again flow are placeholders.
+
+### Debug readiness
+
+Run `DEBUG_READY=true bun run dev` to let anyone connected to the debug table (including spectators) click a player name badge to toggle that player's Ready status. This is off by default and checked on the server. Restart the server to change it. A floating “Reset game” button restarts from any stage with the same seated players, fresh cards and chips, and cleared readiness and history. A player still needs exactly one chip in their area to become Ready; normal stage, active-drag, and connection requirements still apply.
