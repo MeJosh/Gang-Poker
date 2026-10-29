@@ -5,6 +5,8 @@ const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElem
 const canvas = el<HTMLCanvasElement>('table');
 const joinDialog = el<HTMLDialogElement>('join-dialog');
 const readyButton = el<HTMLButtonElement>('ready');
+const mobileChipLayout = matchMedia('(max-width: 800px), (pointer: coarse)');
+function chipScale() { return mobileChipLayout.matches ? 1.3 : 1; }
 joinDialog.addEventListener('cancel', event => event.preventDefault());
 let state: Snapshot | null = null;
 let socket: WebSocket | null = null;
@@ -111,7 +113,6 @@ function updateUI() {
   el<HTMLButtonElement>('sit').hidden = !state.canSit;
   el<HTMLButtonElement>('leave').hidden = !self || state.stage !== 0 || state.phase !== 'playing';
   el<HTMLButtonElement>('leave').disabled = !connected;
-  el('instruction-title').textContent = finished ? 'Every hand tells a story.' : 'No words. Just chips.';
   el('instruction-detail').textContent = finished ? 'Your river chips are your final ranking.' : `1 = weakest · ${state.players.length || 'N'} = strongest · Move any released chip`;
   el('ready-count').textContent = finished ? `${state.players.length} players · ${state.spectators} watching` : `${count} / ${state.players.length} ready${state.players.some(p => !p.connected) ? ' · Waiting for a connection' : ''}`;
   readyButton.hidden = finished || !self;
@@ -127,7 +128,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.shadowMap.enable
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(-9, 9, 9, -9, .1, 100);
-camera.position.set(0, 22, 14); camera.lookAt(0, 0, 0);
+camera.position.set(0, 22, 26.2); camera.lookAt(0, 0, 0);
 scene.add(new THREE.HemisphereLight('#d5f8f1', '#14242c', 1.6));
 const light = new THREE.DirectionalLight('#fff3d6', 2.0); light.position.set(-5, 14, 6); light.castShadow = true;
 light.shadow.mapSize.set(2048, 2048); light.shadow.camera.left = -9; light.shadow.camera.right = 9; light.shadow.camera.top = 9; light.shadow.camera.bottom = -9; light.shadow.normalBias = .04; scene.add(light);
@@ -188,7 +189,9 @@ function makeChip(id: number, stage: number, locked = false) {
   number.position.y = .077; number.rotation.set(-Math.PI / 2, 0, viewAngle); number.userData.chipNumber = true; group.add(number);
   if (!locked) {
     const hit = new THREE.Mesh(new THREE.SphereGeometry(.49, 10, 8), new THREE.MeshBasicMaterial({ visible: false })); hit.userData.chipId = id; group.add(hit);
-  } else group.scale.setScalar(.65);
+  }
+  group.scale.setScalar((locked ? .65 : 1) * chipScale());
+  group.userData.lockedChip = locked;
   group.userData.chipId = locked ? undefined : id;
   return group;
 }
@@ -248,7 +251,7 @@ function updateScene(previous: Snapshot | null) {
           const source = chipMeshes.get(id);
           if (source) {
             history.userData.destination = history.position.clone();
-            history.position.copy(source.position); history.scale.setScalar(1);
+            history.position.copy(source.position); history.scale.copy(source.scale);
           }
         }
         seatGroup.add(history);
@@ -356,11 +359,12 @@ function animate(now: number) {
     for (const [id, motion] of layoutTween.seats) seatAngles.set(id, THREE.MathUtils.lerp(motion.from, motion.to, layoutProgress));
     viewAngle = THREE.MathUtils.lerp(layoutTween.viewFrom, layoutTween.viewTo, layoutProgress);
   }
-  camera.position.set(Math.sin(viewAngle) * 14, 22, Math.cos(viewAngle) * 14); camera.lookAt(0, 0, 0);
+  camera.position.set(Math.sin(viewAngle) * 26.2, 22, Math.cos(viewAngle) * 26.2); camera.lookAt(0, 0, 0);
   // Keep lighting and shadows consistent in each viewer's frame of reference.
   light.position.set(-5 * Math.cos(viewAngle) + 6 * Math.sin(viewAngle), 14, 5 * Math.sin(viewAngle) + 6 * Math.cos(viewAngle));
   if (state) for (const chip of state.chips) {
     const mesh = chipMeshes.get(chip.id); if (!mesh) continue;
+    mesh.scale.setScalar(chipScale());
     const local = dragging?.id === chip.id ? dragging.point : null;
     const motion = layoutTween?.chips.get(chip.id);
     if (motion && !local && !chip.holder) {
@@ -390,7 +394,8 @@ function animate(now: number) {
   if (layoutProgress === 1) layoutTween = null;
   for (const object of staticGroup.children.flatMap(group => group.userData.playerId ? group.children : [group])) {
     const destination = object.userData.destination as THREE.Vector3 | undefined;
-    if (destination) { object.position.lerp(destination, blend * .55); object.scale.lerp(new THREE.Vector3(.65, .65, .65), blend * .55); }
+    if (destination) { object.position.lerp(destination, blend * .55); object.scale.lerp(new THREE.Vector3().setScalar(.65 * chipScale()), blend * .55); }
+    else if (object.userData.lockedChip) object.scale.setScalar(.65 * chipScale());
   }
   // Numbers sit on the chip face, but stay readable from the viewing seat.
   for (const group of [chipGroup, staticGroup]) group.traverse(object => {
