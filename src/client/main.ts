@@ -71,6 +71,15 @@ readyButton.onclick = () => {
   const self = state?.players.find(p => p.id === state!.selfId);
   if (self) send({ type: 'ready', value: self.readyChip === null });
 };
+readyButton.setAttribute('aria-keyshortcuts', 'Space');
+document.addEventListener('keydown', event => {
+  if (event.code !== 'Space' || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (readyButton.disabled || readyButton.hidden || document.querySelector('dialog[open]')) return;
+  const target = event.target;
+  if (target instanceof HTMLElement && target !== readyButton && (target.isContentEditable || target.closest('input, textarea, select, button, a, [role="button"], [role="textbox"]'))) return;
+  event.preventDefault();
+  if (!event.repeat) readyButton.click();
+});
 el('again').onclick = () => send({ type: 'again' });
 el('sit').onclick = () => send({ type: 'sit' });
 el('leave').onclick = () => { cancelDrag(); send({ type: 'leave' }); };
@@ -92,8 +101,6 @@ function updateUI() {
   const owned = state.chips.filter(c => areaFor(c, state!.players) === state!.selfId);
   const connected = socket?.readyState === WebSocket.OPEN;
   const finished = state.phase === 'reveal';
-  el('stage-title').textContent = finished ? 'The moment of truth.' : state.phase === 'transition' ? 'Locking it in…' : `${STAGES[state.stage]}.`;
-  el('stage-description').textContent = finished ? 'All cards on the table. How did your gang do?' : state.players.length < 3 ? `${state.players.length} seated · At least 3 players to advance` : 'Find your place. Let the chips do the talking.';
   el('stage-track').replaceChildren(...STAGES.map((stage, i) => {
     const node = document.createElement('div'); node.className = `stage-step ${i === state!.stage ? 'active' : ''} ${i < state!.stage || finished ? 'done' : ''}`;
     node.style.setProperty('--stage', STAGE_COLORS[i]); const dot = document.createElement('i'); node.append(dot, stage); return node;
@@ -150,19 +157,20 @@ function sprite(text: string, color: string, width: number, height: number, back
   const texture = new THREE.CanvasTexture(surface); texture.colorSpace = THREE.SRGBColorSpace;
   const result = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true })); result.scale.set(width, height, 1); return result;
 }
-function cardSprite(card: string): THREE.Sprite {
+function tableCard(card?: string): THREE.Mesh {
   const surface = document.createElement('canvas'); surface.width = 140; surface.height = 196;
   const ctx = surface.getContext('2d')!;
-  ctx.fillStyle = card === '??' ? '#254b56' : '#f4f0e5'; ctx.beginPath(); ctx.roundRect(3, 3, 134, 190, 12); ctx.fill();
-  if (card === '??') {
-    ctx.strokeStyle = '#68908d'; ctx.lineWidth = 2; ctx.strokeRect(12, 12, 116, 172);
-    ctx.font = '56px serif'; ctx.fillStyle = '#82b3a7'; ctx.textAlign = 'center'; ctx.fillText('♠', 70, 118);
+  if (!card) {
+    ctx.strokeStyle = '#68908d'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.roundRect(5, 5, 130, 186, 12); ctx.stroke();
   } else {
+    ctx.fillStyle = '#f4f0e5'; ctx.beginPath(); ctx.roundRect(3, 3, 134, 190, 12); ctx.fill();
     ctx.fillStyle = 'dh'.includes(card[1]) ? '#c15c67' : '#253c45'; ctx.font = 'bold 43px system-ui'; ctx.fillText(card[0] === 'T' ? '10' : card[0], 15, 53);
     ctx.font = '75px serif'; ctx.textAlign = 'center'; ctx.fillText(({ c: '♣', d: '♦', h: '♥', s: '♠' } as Record<string,string>)[card[1]], 74, 151);
   }
   const texture = new THREE.CanvasTexture(surface); texture.colorSpace = THREE.SRGBColorSpace;
-  const result = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false })); result.scale.set(.65, .91, 1); return result;
+  const result = new THREE.Mesh(new THREE.PlaneGeometry(.65, .91), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }));
+  result.rotation.x = -Math.PI / 2; return result;
 }
 function makeChip(id: number, stage: number, locked = false) {
   const group = new THREE.Group();
@@ -232,11 +240,6 @@ function updateScene(previous: Snapshot | null) {
       const namePoint = seatPoint(i, state.players.length, 6.08);
       const label = sprite(`${player.name}${player.id === state.selfId ? ' · YOU' : ''}${!player.connected ? ' · OFFLINE' : player.readyChip != null ? ' · ✓' : ''}`, player.connected ? '#e3ede5' : '#df9b94', 2.6, .6, '#18383ce8');
       label.position.set(namePoint.x, .25, namePoint.z); seatGroup.add(label);
-      const cardPoint = seatPoint(i, state.players.length, 5.7);
-      player.cards.forEach((card, j) => {
-        const cardObject = cardSprite(card); const offset = (j - .5) * .69;
-        cardObject.position.set(cardPoint.x + Math.cos(angle) * offset, .22, cardPoint.z - Math.sin(angle) * offset); cardObject.scale.multiplyScalar(.72); seatGroup.add(cardObject);
-      });
       player.history.forEach((id, stage) => {
         const history = makeChip(id, stage, true); const center = seatPoint(i, state!.players.length, 5.08); const offset = (stage - 1.5) * .5;
         history.position.set(center.x + Math.cos(angle) * offset, .1, center.z - Math.sin(angle) * offset);
@@ -251,13 +254,11 @@ function updateScene(previous: Snapshot | null) {
       });
     }
     for (let i = 0; i < 5; i++) {
-      const boardCard = cardSprite(state.board[i] || '??');
+      const boardCard = tableCard(state.board[i]);
       // Community cards face the viewing seat, without changing table coordinates.
-      const offset = (i - 2) * .76;
-      boardCard.position.set(offset, .1, 0); boardCard.scale.multiplyScalar(.95); boardCard.userData.boardOffset = offset; staticGroup.add(boardCard);
+      const offset = (i - 2) * 1.22;
+      boardCard.position.set(offset, -.045, 0); boardCard.scale.multiplyScalar(1.65); boardCard.userData.boardOffset = offset; staticGroup.add(boardCard);
     }
-    const caption = sprite('LOW  1     ·     TRUST YOUR GANG     ·     N  HIGH', '#91c0ae', 4.8, .36);
-    caption.position.set(0, .05, -.9); caption.userData.viewRadius = -.9; staticGroup.add(caption);
   }
   const chipSignature = `${state.stage}:${state.phase}`;
   if (chipGroup.userData.signature !== chipSignature) {
@@ -355,6 +356,8 @@ function animate(now: number) {
     viewAngle = THREE.MathUtils.lerp(layoutTween.viewFrom, layoutTween.viewTo, layoutProgress);
   }
   camera.position.set(Math.sin(viewAngle) * 14, 22, Math.cos(viewAngle) * 14); camera.lookAt(0, 0, 0);
+  // Keep lighting and shadows consistent in each viewer's frame of reference.
+  light.position.set(-5 * Math.cos(viewAngle) + 6 * Math.sin(viewAngle), 14, 5 * Math.sin(viewAngle) + 6 * Math.cos(viewAngle));
   if (state) for (const chip of state.chips) {
     const mesh = chipMeshes.get(chip.id); if (!mesh) continue;
     const local = dragging?.id === chip.id ? dragging.point : null;
@@ -376,13 +379,11 @@ function animate(now: number) {
       const player = state.players.find(p => p.id === object.userData.playerId);
       if (player) object.rotation.y = (seatAngles.get(player.id) ?? 0) - player.seat * Math.PI * 2 / state.players.length;
     }
-    if (object.userData.viewRadius !== undefined) {
-      const radius = object.userData.viewRadius;
-      object.position.set(Math.sin(viewAngle) * radius, .05, Math.cos(viewAngle) * radius);
-    }
     if (object.userData.boardOffset !== undefined) {
       const offset = object.userData.boardOffset;
-      object.position.set(Math.cos(viewAngle) * offset, .1, -Math.sin(viewAngle) * offset);
+      object.position.set(Math.cos(viewAngle) * offset, -.045, -Math.sin(viewAngle) * offset);
+      // Align the flat card's top edge away from the viewing player.
+      object.rotation.set(-Math.PI / 2, 0, viewAngle);
     }
   }
   if (layoutProgress === 1) layoutTween = null;
