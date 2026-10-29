@@ -48,12 +48,42 @@ export class Game {
   sit(id: string) {
     const member = this.members.get(id);
     if (!member || !member.connected || !this.canSit() || this.players.some(p => p.id === id)) return;
-    const seat = Array.from({ length: this.maxPlayers }, (_, i) => i).find(i => !this.players.some(p => p.seat === i))!;
+    const previous = this.players.map(p => ({ ...p }));
+    const seat = this.players.length;
     this.players.push({ id, name: member.name, seat, connected: true, readyChip: null, cards: [this.deck.pop()!, this.deck.pop()!], history: [] });
-    this.players.forEach(p => p.readyChip = null);
+    this.reseat(previous);
     const count = this.players.length;
     const angle = (count - 1) * 2.4;
     this.chips.push({ id: count, x: Math.sin(angle) * 1.65, z: Math.cos(angle) * 1.65, holder: null });
+  }
+  // Classify chips against the old layout before moving any seat or chip.
+  reseat(previous: Pick<Player, 'id' | 'seat'>[]) {
+    const owners = this.chips.map(chip => areaFor(chip, previous));
+    this.players.forEach((player, seat) => { player.seat = seat; player.readyChip = null; });
+    this.chips.forEach((chip, index) => {
+      const before = previous.find(p => p.id === owners[index]);
+      const after = this.players.find(p => p.id === owners[index]);
+      if (before && after) {
+        const angle = after.seat * Math.PI * 2 / this.players.length - before.seat * Math.PI * 2 / previous.length;
+        const { x, z } = chip;
+        chip.x = x * Math.cos(angle) + z * Math.sin(angle);
+        chip.z = z * Math.cos(angle) - x * Math.sin(angle);
+      }
+      // End drags so a stale pointer cannot undo the layout change.
+      chip.holder = null;
+    });
+    this.leases.clear();
+  }
+  leave(id: string) {
+    if (this.phase !== 'playing' || this.stage !== 0) return;
+    const player = this.players.find(p => p.id === id);
+    if (!player) return;
+    const previous = this.players.map(p => ({ ...p }));
+    this.players = this.players.filter(p => p.id !== id);
+    this.deck.unshift(...player.cards);
+    this.reseat(previous);
+    // Keep ranks contiguous: a table of N players has chips 1 through N.
+    this.chips = this.chips.filter(chip => chip.id <= this.players.length);
   }
   disconnect(id: string) {
     const member = this.members.get(id);
@@ -67,11 +97,12 @@ export class Game {
   }
   invalidateReady() {
     for (const player of this.players) {
-      const chips = this.chips.filter(c => areaFor(c, this.players, this.maxPlayers) === player.id);
+      const chips = this.chips.filter(c => areaFor(c, this.players) === player.id);
       if (chips.length !== 1 || chips[0].id !== player.readyChip) player.readyChip = null;
     }
   }
   action(id: string, action: Action, now = Date.now()) {
+    if (action.type === 'leave') { this.leave(id); this.revision++; return; }
     if (action.type === 'sit') { this.sit(id); this.revision++; return; }
     const player = this.players.find(p => p.id === id);
     if (!player || !player.connected) return;
@@ -94,7 +125,7 @@ export class Game {
     } else if (action.type === 'release' && chip?.holder === id) {
       chip.holder = null; this.leases.delete(chip.id);
     } else if (action.type === 'ready') {
-      const owned = this.chips.filter(c => areaFor(c, this.players, this.maxPlayers) === id);
+      const owned = this.chips.filter(c => areaFor(c, this.players) === id);
       player.readyChip = action.value && owned.length === 1 ? owned[0].id : null;
     } else return;
     this.invalidateReady(); this.maybeAdvance(now); this.revision++;

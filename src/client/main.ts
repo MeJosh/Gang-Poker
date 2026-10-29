@@ -41,10 +41,11 @@ function connect() {
     }
     if (message.type === 'state') {
       const previous = state; state = message.state;
+      if (dragging && previous && JSON.stringify(previous.players.map(p => [p.id, p.seat])) !== JSON.stringify(state!.players.map(p => [p.id, p.seat]))) cancelDrag(false);
       if (dragging && (state!.phase !== 'playing' || state!.chips.find(c => c.id === dragging!.id)?.holder !== state!.selfId)) {
         if (performance.now() - dragging.started > 500 || state!.phase !== 'playing') cancelDrag(false);
       }
-      updateScene(); updateUI();
+      updateScene(previous); updateUI();
       if (previous && previous.stage !== state!.stage) toast(`${STAGES[state!.stage]} · Find your place again`);
     }
   };
@@ -72,6 +73,7 @@ readyButton.onclick = () => {
 };
 el('again').onclick = () => send({ type: 'again' });
 el('sit').onclick = () => send({ type: 'sit' });
+el('leave').onclick = () => { cancelDrag(); send({ type: 'leave' }); };
 setInterval(() => { send({ type: 'ping' }); if (dragging) send({ type: 'move', chip: dragging.id, ...dragging.point }); }, 3000);
 
 function cardElement(card: string) {
@@ -87,7 +89,7 @@ function updateUI() {
   if (!state) return;
   const self = state.players.find(p => p.id === state!.selfId);
   const count = state.players.filter(p => p.readyChip !== null).length;
-  const owned = state.chips.filter(c => areaFor(c, state!.players, state!.maxPlayers) === state!.selfId);
+  const owned = state.chips.filter(c => areaFor(c, state!.players) === state!.selfId);
   const connected = socket?.readyState === WebSocket.OPEN;
   const finished = state.phase === 'reveal';
   el('stage-title').textContent = finished ? 'The moment of truth.' : state.phase === 'transition' ? 'Locking it in…' : `${STAGES[state.stage]}.`;
@@ -100,6 +102,8 @@ function updateUI() {
   el('hand-label').textContent = self ? finished ? 'YOUR REVEALED HAND' : 'YOUR PRIVATE HAND' : 'SPECTATOR';
   el('spectating').hidden = !!self;
   el<HTMLButtonElement>('sit').hidden = !state.canSit;
+  el<HTMLButtonElement>('leave').hidden = !self || state.stage !== 0 || state.phase !== 'playing';
+  el<HTMLButtonElement>('leave').disabled = !connected;
   el('instruction-title').textContent = finished ? 'Every hand tells a story.' : 'No words. Just chips.';
   el('instruction-detail').textContent = finished ? 'Your river chips are your final ranking.' : `1 = weakest · ${state.players.length || 'N'} = strongest · Move any released chip`;
   el('ready-count').textContent = finished ? `${state.players.length} players · ${state.spectators} watching` : `${count} / ${state.players.length} ready${state.players.some(p => !p.connected) ? ' · Waiting for a connection' : ''}`;
@@ -180,32 +184,61 @@ function makeChip(id: number, stage: number, locked = false) {
   return group;
 }
 let viewAngle = 0;
-function updateScene() {
+const seatAngles = new Map<string, number>();
+let layoutTween: { started: number; seats: Map<string, { from: number; to: number }>; viewFrom: number; viewTo: number; chips: Map<number, { x: number; z: number; angle: number }> } | null = null;
+function nearestAngle(from: number, to: number) {
+  return from + Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+function updateScene(previous: Snapshot | null) {
   if (!state) return;
   const self = state.players.find(p => p.id === state!.selfId);
-  viewAngle = (self?.seat ?? 0) * Math.PI * 2 / state.maxPlayers;
-  camera.position.set(Math.sin(viewAngle) * 14, 22, Math.cos(viewAngle) * 14); camera.lookAt(0, 0, 0);
+  const targetView = (self?.seat ?? 0) * Math.PI * 2 / Math.max(1, state.players.length);
+  const layoutChanged = previous && JSON.stringify(previous.players.map(p => [p.id, p.seat])) !== JSON.stringify(state.players.map(p => [p.id, p.seat]));
+  if (layoutChanged && !reducedMotion) {
+    const seats = new Map<string, { from: number; to: number }>();
+    for (const player of state.players) {
+      const target = player.seat * Math.PI * 2 / state.players.length;
+      const from = seatAngles.get(player.id) ?? target;
+      seats.set(player.id, { from, to: nearestAngle(from, target) });
+    }
+    const chips = new Map<number, { x: number; z: number; angle: number }>();
+    for (const chip of previous.chips) {
+      const owner = areaFor(chip, previous.players);
+      const motion = owner ? seats.get(owner) : undefined;
+      const mesh = chipMeshes.get(chip.id);
+      if (motion && mesh) chips.set(chip.id, { x: mesh.position.x, z: mesh.position.z, angle: motion.to - motion.from });
+    }
+    layoutTween = { started: performance.now(), seats, viewFrom: viewAngle, viewTo: nearestAngle(viewAngle, targetView), chips };
+  } else if (!previous || reducedMotion) {
+    layoutTween = null; viewAngle = targetView;
+  }
+  for (const player of state.players) {
+    if (!layoutTween?.seats.has(player.id)) seatAngles.set(player.id, player.seat * Math.PI * 2 / state.players.length);
+  }
+  for (const id of seatAngles.keys()) if (!state.players.some(p => p.id === id)) seatAngles.delete(id);
   const signature = JSON.stringify([state.stage, state.phase, state.maxPlayers, state.board, state.players.map(p => [p.id, p.seat, p.name, p.readyChip, p.connected, p.cards, p.history])]);
   if (signature !== sceneSignature) {
     sceneSignature = signature; disposeGroup(staticGroup);
-    for (let i = 0; i < state.maxPlayers; i++) {
-      const player = state.players.find(p => p.seat === i);
-      const point = seatPoint(i, state.maxPlayers); const angle = i * Math.PI * 2 / state.maxPlayers;
+    for (const player of state.players) {
+      const seatGroup = new THREE.Group();
+      seatGroup.userData.playerId = player.id;
+      staticGroup.add(seatGroup);
+      const i = player.seat;
+      const point = seatPoint(i, state.players.length); const angle = i * Math.PI * 2 / state.players.length;
       const color = SEAT_COLORS[i % SEAT_COLORS.length];
-      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color: player?.readyChip != null ? '#9af0ca' : player ? color : '#5d8f86', transparent: true, opacity: player ? .7 : .22, side: THREE.DoubleSide }));
-      zone.rotation.x = -Math.PI / 2; zone.position.set(point.x, -.055, point.z); staticGroup.add(zone);
-      const inside = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), new THREE.MeshBasicMaterial({ color: player?.readyChip != null ? '#83e5c1' : color, transparent: true, opacity: player ? .045 : .015 })); inside.rotation.x = -Math.PI / 2; inside.position.set(point.x, -.06, point.z); staticGroup.add(inside);
-      const namePoint = seatPoint(i, state.maxPlayers, 6.08);
-      const label = sprite(player ? `${player.name}${player.id === state.selfId ? ' · YOU' : ''}${!player.connected ? ' · OFFLINE' : player.readyChip != null ? ' · ✓' : ''}` : 'OPEN SEAT', player ? player.connected ? '#e3ede5' : '#df9b94' : '#73978f', 2.6, .6, player ? '#18383ce8' : undefined);
-      label.position.set(namePoint.x, .25, namePoint.z); staticGroup.add(label);
-      if (!player) continue;
-      const cardPoint = seatPoint(i, state.maxPlayers, 5.7);
+      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color: player.readyChip != null ? '#9af0ca' : color, transparent: true, opacity: .7, side: THREE.DoubleSide }));
+      zone.rotation.x = -Math.PI / 2; zone.position.set(point.x, -.055, point.z); seatGroup.add(zone);
+      const inside = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), new THREE.MeshBasicMaterial({ color: player.readyChip != null ? '#83e5c1' : color, transparent: true, opacity: .045 })); inside.rotation.x = -Math.PI / 2; inside.position.set(point.x, -.06, point.z); seatGroup.add(inside);
+      const namePoint = seatPoint(i, state.players.length, 6.08);
+      const label = sprite(`${player.name}${player.id === state.selfId ? ' · YOU' : ''}${!player.connected ? ' · OFFLINE' : player.readyChip != null ? ' · ✓' : ''}`, player.connected ? '#e3ede5' : '#df9b94', 2.6, .6, '#18383ce8');
+      label.position.set(namePoint.x, .25, namePoint.z); seatGroup.add(label);
+      const cardPoint = seatPoint(i, state.players.length, 5.7);
       player.cards.forEach((card, j) => {
         const cardObject = cardSprite(card); const offset = (j - .5) * .69;
-        cardObject.position.set(cardPoint.x + Math.cos(angle) * offset, .22, cardPoint.z - Math.sin(angle) * offset); cardObject.scale.multiplyScalar(.72); staticGroup.add(cardObject);
+        cardObject.position.set(cardPoint.x + Math.cos(angle) * offset, .22, cardPoint.z - Math.sin(angle) * offset); cardObject.scale.multiplyScalar(.72); seatGroup.add(cardObject);
       });
       player.history.forEach((id, stage) => {
-        const history = makeChip(id, stage, true); const center = seatPoint(i, state!.maxPlayers, 5.08); const offset = (stage - 1.5) * .5;
+        const history = makeChip(id, stage, true); const center = seatPoint(i, state!.players.length, 5.08); const offset = (stage - 1.5) * .5;
         history.position.set(center.x + Math.cos(angle) * offset, .1, center.z - Math.sin(angle) * offset);
         if (state!.phase === 'transition' && stage === state!.stage && !reducedMotion) {
           const source = chipMeshes.get(id);
@@ -214,21 +247,26 @@ function updateScene() {
             history.position.copy(source.position); history.scale.setScalar(1);
           }
         }
-        staticGroup.add(history);
+        seatGroup.add(history);
       });
     }
     for (let i = 0; i < 5; i++) {
       const boardCard = cardSprite(state.board[i] || '??');
       // Community cards face the viewing seat, without changing table coordinates.
       const offset = (i - 2) * .76;
-      boardCard.position.set(Math.cos(viewAngle) * offset, .1, -Math.sin(viewAngle) * offset); boardCard.scale.multiplyScalar(.95); staticGroup.add(boardCard);
+      boardCard.position.set(offset, .1, 0); boardCard.scale.multiplyScalar(.95); boardCard.userData.boardOffset = offset; staticGroup.add(boardCard);
     }
     const caption = sprite('LOW  1     ·     TRUST YOUR GANG     ·     N  HIGH', '#91c0ae', 4.8, .36);
-    caption.position.set(Math.sin(viewAngle) * -.9, .05, Math.cos(viewAngle) * -.9); staticGroup.add(caption);
+    caption.position.set(0, .05, -.9); caption.userData.viewRadius = -.9; staticGroup.add(caption);
   }
   const chipSignature = `${state.stage}:${state.phase}`;
   if (chipGroup.userData.signature !== chipSignature) {
     disposeGroup(chipGroup); chipMeshes.clear(); chipGroup.userData.signature = chipSignature;
+  }
+  for (const [id, mesh] of chipMeshes) {
+    if (!state.chips.some(chip => chip.id === id)) {
+      chipGroup.remove(mesh); disposeGroup(mesh); chipMeshes.delete(id);
+    }
   }
   const active = state.phase === 'playing';
   for (const chip of state.chips) {
@@ -259,7 +297,7 @@ function cancelDrag(release = true) {
   dragging = null; canvas.style.cursor = 'grab';
 }
 canvas.addEventListener('pointerdown', event => {
-  if (dragging || !state || state.phase !== 'playing' || socket?.readyState !== WebSocket.OPEN || !state.players.some(p => p.id === state!.selfId)) return;
+  if (layoutTween || dragging || !state || state.phase !== 'playing' || socket?.readyState !== WebSocket.OPEN || !state.players.some(p => p.id === state!.selfId)) return;
   const point = pointerWorld(event); if (!point) return;
   const hits = raycaster.intersectObjects(chipGroup.children, true);
   const hit = hits.find(h => h.object.userData.chipId !== undefined || h.object.parent?.userData.chipId !== undefined);
@@ -309,14 +347,46 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let lastFrame = performance.now();
 function animate(now: number) {
   const blend = reducedMotion ? 1 : 1 - Math.exp(-Math.min(now - lastFrame, 100) / 70); lastFrame = now;
+  let layoutProgress = 1;
+  if (layoutTween) {
+    const progress = Math.min(1, (now - layoutTween.started) / 400);
+    layoutProgress = progress * progress * (3 - 2 * progress);
+    for (const [id, motion] of layoutTween.seats) seatAngles.set(id, THREE.MathUtils.lerp(motion.from, motion.to, layoutProgress));
+    viewAngle = THREE.MathUtils.lerp(layoutTween.viewFrom, layoutTween.viewTo, layoutProgress);
+  }
+  camera.position.set(Math.sin(viewAngle) * 14, 22, Math.cos(viewAngle) * 14); camera.lookAt(0, 0, 0);
   if (state) for (const chip of state.chips) {
     const mesh = chipMeshes.get(chip.id); if (!mesh) continue;
     const local = dragging?.id === chip.id ? dragging.point : null;
-    mesh.position.x += ((local?.x ?? chip.x) - mesh.position.x) * (local ? 1 : blend);
-    mesh.position.z += ((local?.z ?? chip.z) - mesh.position.z) * (local ? 1 : blend);
+    const motion = layoutTween?.chips.get(chip.id);
+    if (motion && !local && !chip.holder) {
+      const angle = motion.angle * layoutProgress;
+      const endX = motion.x * Math.cos(motion.angle) + motion.z * Math.sin(motion.angle);
+      const endZ = motion.z * Math.cos(motion.angle) - motion.x * Math.sin(motion.angle);
+      mesh.position.x = motion.x * Math.cos(angle) + motion.z * Math.sin(angle) + (chip.x - endX) * layoutProgress;
+      mesh.position.z = motion.z * Math.cos(angle) - motion.x * Math.sin(angle) + (chip.z - endZ) * layoutProgress;
+    } else {
+      mesh.position.x += ((local?.x ?? chip.x) - mesh.position.x) * (local ? 1 : blend);
+      mesh.position.z += ((local?.z ?? chip.z) - mesh.position.z) * (local ? 1 : blend);
+    }
     mesh.position.y += ((chip.holder || local ? .48 : .12) - mesh.position.y) * blend;
   }
   for (const object of staticGroup.children) {
+    if (object.userData.playerId && state) {
+      const player = state.players.find(p => p.id === object.userData.playerId);
+      if (player) object.rotation.y = (seatAngles.get(player.id) ?? 0) - player.seat * Math.PI * 2 / state.players.length;
+    }
+    if (object.userData.viewRadius !== undefined) {
+      const radius = object.userData.viewRadius;
+      object.position.set(Math.sin(viewAngle) * radius, .05, Math.cos(viewAngle) * radius);
+    }
+    if (object.userData.boardOffset !== undefined) {
+      const offset = object.userData.boardOffset;
+      object.position.set(Math.cos(viewAngle) * offset, .1, -Math.sin(viewAngle) * offset);
+    }
+  }
+  if (layoutProgress === 1) layoutTween = null;
+  for (const object of staticGroup.children.flatMap(group => group.userData.playerId ? group.children : [group])) {
     const destination = object.userData.destination as THREE.Vector3 | undefined;
     if (destination) { object.position.lerp(destination, blend * .55); object.scale.lerp(new THREE.Vector3(.65, .65, .65), blend * .55); }
   }

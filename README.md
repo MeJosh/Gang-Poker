@@ -13,7 +13,7 @@ make dev
 
 Open http://localhost:3000. All visitors join the same table after entering a display name. At least three seated players are required to advance. To test several players on one computer, use separate browser profiles or private browsing sessions: tabs sharing browser storage reclaim the same seat.
 
-To play on phones on the same network, open `http://<your-computer-LAN-address>:3000`. Touch and mouse both use direct dragging. This first pass keeps the same fixed-seat layout across screen sizes; responsive layout and reveal choreography remain areas to refine.
+To play on phones on the same network, open `http://<your-computer-LAN-address>:3000`. Touch and mouse both use direct dragging. Occupied seats spread evenly around the table for the current player count; responsive layout and reveal choreography remain areas to refine.
 
 The development server watches server/shared source files and rebuilds the client on restart. After changing client-only files, run `make build` and refresh the browser.
 
@@ -46,7 +46,7 @@ One Bun process serves static assets and WebSockets from the same origin. The im
 
 ## Game flow
 
-- Pre-flop opens immediately. New players take available seats until it locks; spectators can join anytime. “Watch instead” bypasses seating.
+- Pre-flop opens immediately. New players take available seats until it locks; spectators can join anytime. “Watch instead” bypasses seating. “Leave seat” returns a player to spectating during pre-flop. Seats spread evenly around the circle; chips inside a remaining player’s area rotate with them and other chips stay put. Leaving removes the highest numbered chip. Layout changes end active drags and clear readiness.
 - Each player sees their own two cards. Spectators and other players receive card backs until the reveal.
 - Drag any released chip anywhere on the felt. Active drags are exclusive; a lifted chip and a small seat-colored name marker identify its controller.
 - Exactly one current-stage chip must have its center inside your circle to confirm Ready. Your confirmation belongs to that chip, and clears if the chip leaves, changes, or another chip enters. You can withdraw Ready manually.
@@ -66,4 +66,4 @@ The server decides drag ownership, positions, readiness, and transitions. Local 
 - [CONTEXT.md](CONTEXT.md): domain glossary.
 - [docs/mvp.md](docs/mvp.md): agreed MVP scope and deferred work.
 
-Deferred: multiple rooms, persistent recovery, replacing absent players, scoring, history infographics, refined animations, adaptive seating layouts, and chip physics. The reveal and Play again flow are placeholders.
+Deferred: multiple rooms, persistent recovery, replacing absent players, scoring, history infographics, refined animations, and chip physics. The reveal and Play again flow are placeholders.

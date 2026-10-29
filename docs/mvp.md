@@ -8,7 +8,7 @@
 - Private cards stay face up on their owner's screen, with no peek control. Other viewers see card backs until the reveal.
 - The table opens directly into pre-flop without a host start action. Players may join until pre-flop locks; spectators may join anytime.
 - Pre-flop requires at least three seated players to complete. The seat limit is configurable and defaults to six.
-- Joining during pre-flop deals the newcomer two cards, adds the next numbered chip, and clears everyone's ready status. Existing cards and chip positions stay in place.
+- Joining during pre-flop deals the newcomer two cards, adds the next numbered chip, and clears everyone's ready status. Existing cards stay unchanged. Seats redistribute evenly around the circle. Chips whose centers are inside a remaining player’s area rotate with them; other chips stay at their table coordinates.
 - Each stage uses a fresh set of chips with a distinct color. When everyone is ready simultaneously, its chips move to fixed history positions in front of their holders and lock. Readiness clears for the next stage.
 - Only the final ranking matters. Earlier chips preserve communication history. Scoring and automatic ranking checks are outside the MVP.
 - After river locks, all private cards are revealed. Reveal choreography will be designed later.
@@ -36,7 +36,7 @@
 ## Devices and connections
 
 - Mouse and touch interaction are required, including phone support. Detailed responsive layout remains to be designed.
-- First-pass layout uses fixed seat positions around an oval table, with the viewer's own seat nearest the bottom. New players occupy empty seats without rearranging existing players. Layouts adapting to player count can be explored later.
+- Only occupied seats are shown, spread evenly around the circular table, with the viewer’s own seat nearest the bottom. Joining or explicitly leaving during pre-flop redistributes seats and clears readiness. Active drags end on layout changes. Leaving removes the highest numbered chip so ranks remain 1 through the player count; chips in the departing player’s area otherwise stay in place.
 - A disconnected player's seat and cards are preserved, their active drag is released, and their ready status clears. The game waits for them to reconnect.
 - Disconnected seats are visibly marked. Other players may keep moving chips while stage completion waits for the absent player.
 - Removing or replacing absent players is deferred until after the MVP.

@@ -14,7 +14,7 @@ if (process.env.NODE_ENV !== 'production') {
 function validAction(value: unknown): value is Action {
   if (!value || typeof value !== 'object') return false;
   const a = value as Record<string, unknown>;
-  if (a.type === 'again' || a.type === 'sit') return true;
+  if (a.type === 'again' || a.type === 'sit' || a.type === 'leave') return true;
   if (a.type === 'ready') return typeof a.value === 'boolean';
   if (!Number.isInteger(a.chip) || Number(a.chip) < 1 || Number(a.chip) > game.maxPlayers) return false;
   if (a.type === 'grab' || a.type === 'release') return true;

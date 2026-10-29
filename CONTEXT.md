@@ -8,7 +8,7 @@ A cooperative card game in which players communicate only through numbered chips
 The shared game space that players join from their own devices, each viewing it from their seat. Chip movements, community cards, and locked chip history are visible to everyone.
 
 **Player**:
-A participant occupying a seat with two private cards and a player area. Players may take a seat until pre-flop locks; each new player adds the next numbered rank chip and clears every player's ready confirmation while existing cards and chip positions remain in place.
+A participant occupying a seat with two private cards and a player area. Players may take a seat until pre-flop locks; each new player adds the next numbered rank chip and clears every player's ready confirmation while existing cards remain unchanged. Seats spread evenly around the circle; chips whose centers are inside a remaining player’s area rotate with that player, and other chips keep their table coordinates.
 
 **Spectator**:
 A participant who watches the shared table without occupying a seat or taking part in ranking. Spectators may join at any time and cannot see private cards until the reveal.

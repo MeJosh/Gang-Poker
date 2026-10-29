@@ -20,14 +20,15 @@ export type Action =
   | { type: 'release'; chip: number }
   | { type: 'ready'; value: boolean }
   | { type: 'again' }
-  | { type: 'sit' };
+  | { type: 'sit' }
+  | { type: 'leave' };
 export function seatPoint(seat: number, max: number, radius = 4.35): Point {
   const angle = seat * Math.PI * 2 / max;
   return { x: Math.sin(angle) * radius, z: Math.cos(angle) * radius };
 }
-export function areaFor(point: Point, players: Pick<Player, 'id' | 'seat'>[], max: number): string | null {
+export function areaFor(point: Point, players: Pick<Player, 'id' | 'seat'>[]): string | null {
   for (const player of players) {
-    const center = seatPoint(player.seat, max);
+    const center = seatPoint(player.seat, players.length);
     if (Math.hypot(point.x - center.x, point.z - center.z) <= 1.12) return player.id;
   }
   return null;

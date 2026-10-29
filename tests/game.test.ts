@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Game } from '../src/server/game';
-import { seatPoint } from '../src/shared/types';
+import { areaFor, seatPoint } from '../src/shared/types';
 function table(count = 3, max = 6) {
   const game = new Game(max);
   const ids = Array.from({ length: count }, (_, i) => game.join(`Player ${i + 1}`, null, false).member.id);
@@ -9,7 +9,7 @@ function table(count = 3, max = 6) {
 function place(game: Game, mover: string, chip: number, owner: string, now = 100) {
   const player = game.players.find(p => p.id === owner)!;
   game.action(mover, { type: 'grab', chip }, now);
-  game.action(mover, { type: 'move', chip, ...seatPoint(player.seat, game.maxPlayers) }, now);
+  game.action(mover, { type: 'move', chip, ...seatPoint(player.seat, game.players.length) }, now);
   game.action(mover, { type: 'release', chip }, now);
 }
 function rankAll(game: Game, ids: string[], now = 100) {
@@ -30,13 +30,58 @@ describe('cooperative game rules', () => {
     expect(game.join('Different name', member.token, false).member.id).toBe(ids[0]);
     expect(game.players).toHaveLength(3);
   });
-  test('joining pre-flop preserves cards and positions, appends chip and clears readiness', () => {
+  test('joining pre-flop preserves cards and carries area chips, appends chip and clears readiness', () => {
     const { game, ids } = table();
     place(game, ids[0], 1, ids[0]); game.action(ids[0], { type: 'ready', value: true });
     const cards = [...game.players[0].cards]; const position = { ...game.chips[0] };
     game.join('Fourth', null, false);
     expect(game.players[0].cards).toEqual(cards); expect(game.chips[0]).toEqual(position);
     expect(game.chips.map(c => c.id)).toEqual([1, 2, 3, 4]); expect(game.players[0].readyChip).toBeNull();
+  });
+  test('joining rotates all chips in an area and leaves outside chips untouched', () => {
+    const { game, ids } = table();
+    const center = seatPoint(1, 3);
+    Object.assign(game.chips[0], { x: center.x + .25, z: center.z - .2 });
+    Object.assign(game.chips[1], { x: center.x - .3, z: center.z + .15 });
+    const outside = { ...game.chips[2] };
+    const before = game.chips.slice(0, 2).map(c => ({ ...c }));
+    game.action(ids[0], { type: 'grab', chip: 1 });
+    game.join('Fourth', null, false);
+    before.forEach((chip, i) => {
+      const angle = Math.PI / 2 - Math.PI * 2 / 3;
+      expect(game.chips[i].x).toBeCloseTo(chip.x * Math.cos(angle) + chip.z * Math.sin(angle));
+      expect(game.chips[i].z).toBeCloseTo(chip.z * Math.cos(angle) - chip.x * Math.sin(angle));
+      expect(areaFor(game.chips[i], game.players)).toBe(ids[1]);
+    });
+    expect(game.chips[2]).toEqual(outside);
+    expect(game.chips[0].holder).toBeNull(); expect(game.leases.size).toBe(0);
+  });
+  test('leaving pre-flop compacts seats, carries remaining area chips and permits rejoining', () => {
+    const { game, ids } = table(4);
+    place(game, ids[0], 1, ids[2]);
+    place(game, ids[0], 2, ids[1]);
+    const departedAreaChip = { ...game.chips[1] };
+    const cards = [...game.players[2].cards];
+    game.action(ids[1], { type: 'leave' });
+    expect(game.players.map(p => p.seat)).toEqual([0, 1, 2]);
+    expect(game.players[1].cards).toEqual(cards);
+    expect(areaFor(game.chips[0], game.players)).toBe(ids[2]);
+    expect(game.chips[1]).toEqual(departedAreaChip);
+    expect(game.chips.map(c => c.id)).toEqual([1, 2, 3]);
+    expect(game.snapshot(ids[1]).canSit).toBe(true);
+    game.action(ids[1], { type: 'sit' });
+    expect(game.players.map(p => p.seat)).toEqual([0, 1, 2, 3]);
+    expect(game.chips.map(c => c.id)).toEqual([1, 2, 3, 4]);
+  });
+  test('leaving is blocked after pre-flop locks and empty tables can be seated again', () => {
+    const { game, ids } = table(); rankAll(game, ids);
+    game.action(ids[0], { type: 'leave' }); expect(game.players).toHaveLength(3);
+    game.tick(1700); game.action(ids[0], { type: 'leave' }); expect(game.players).toHaveLength(3);
+    const solo = table(1);
+    solo.game.action(solo.ids[0], { type: 'leave' });
+    expect(solo.game.players).toHaveLength(0); expect(solo.game.chips).toHaveLength(0);
+    solo.game.action(solo.ids[0], { type: 'sit' });
+    expect(solo.game.players[0].seat).toBe(0); expect(solo.game.chips).toHaveLength(1);
   });
   test('capacity is configurable and extra players become spectators', () => {
     const { game } = table(4, 3); expect(game.players).toHaveLength(3); expect(game.members.size).toBe(4);
