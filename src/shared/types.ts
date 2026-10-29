@@ -1,5 +1,5 @@
 export const STAGES = ['Pre-flop', 'Flop', 'Turn', 'River'] as const;
-export const STAGE_COLORS = ['#f4c56a', '#6ed6c3', '#a8afff', '#ed99b4'];
+export const STAGE_COLORS = ['#f5f3eb', '#f4d35e', '#f29b50', '#eb6b6b'];
 export const SEAT_COLORS = ['#ffad72', '#84d3ff', '#cf9bff', '#a5df80', '#ff8caa', '#ffe38a', '#74dbc6', '#d6c3a0', '#a4b9ed', '#ecb9db'];
 export type Card = string;
 export type Phase = 'playing' | 'transition' | 'reveal';

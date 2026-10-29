@@ -48,7 +48,7 @@ One Bun process serves static assets and WebSockets from the same origin. The im
 
 - Pre-flop opens immediately. New players take available seats until it locks; spectators can join anytime. “Watch instead” bypasses seating. “Leave seat” returns a player to spectating during pre-flop. Seats spread evenly around the circle; chips inside a remaining player’s area rotate with them and other chips stay put. Leaving removes the highest numbered chip. Layout changes end active drags and clear readiness.
 - Each player sees their own two cards. Spectators and other players receive card backs until the reveal.
-- Drag any released chip anywhere on the felt. Active drags are exclusive; a lifted chip and a small seat-colored name marker identify its controller.
+- Drag any released chip anywhere on the felt. Active drags are exclusive; a lifted chip and a glow in its controller’s seat color identify who is moving it.
 - Exactly one current-stage chip must have its center inside your circle to confirm Ready. Your confirmation belongs to that chip, and clears if the chip leaves, changes, or another chip enters. You can withdraw Ready manually.
 - Everyone must be connected and Ready, with no active drag, to advance. Three players are required. Completed chips move to locked history positions; the next stage gets fresh chips in a new color.
 - Flop reveals three shared cards, turn one, and river one. After river locks, every hand is revealed. Any seated player can choose Play again.

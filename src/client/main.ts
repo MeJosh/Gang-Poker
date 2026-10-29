@@ -6,6 +6,7 @@ const canvas = el<HTMLCanvasElement>('table');
 const joinDialog = el<HTMLDialogElement>('join-dialog');
 const readyButton = el<HTMLButtonElement>('ready');
 const mobileChipLayout = matchMedia('(max-width: 800px), (pointer: coarse)');
+const mobileTableLayout = matchMedia('(orientation: landscape) and (max-height: 700px) and (max-width: 1100px), (orientation: landscape) and (max-height: 700px) and (pointer: coarse)');
 function chipScale() { return mobileChipLayout.matches ? 1.3 : 1; }
 joinDialog.addEventListener('cancel', event => event.preventDefault());
 let state: Snapshot | null = null;
@@ -108,6 +109,19 @@ function updateUI() {
     node.style.setProperty('--stage', STAGE_COLORS[i]); const dot = document.createElement('i'); node.append(dot, stage); return node;
   }));
   el('hand').replaceChildren(...(self?.cards || []).map(cardElement));
+  el('players').replaceChildren(...state.players.map(player => {
+    const badge = document.createElement('div'); badge.className = 'player-chip'; badge.setAttribute('role', 'listitem');
+    badge.style.setProperty('--player-color', SEAT_COLORS[player.seat % SEAT_COLORS.length]);
+    const name = document.createElement('span'); name.className = 'player-name';
+    name.textContent = player.name;
+    badge.append(name);
+    const check = document.createElement('span'); check.className = 'player-ready'; check.textContent = '✓';
+    check.setAttribute('aria-hidden', 'true'); check.style.visibility = player.readyChip !== null ? 'visible' : 'hidden'; badge.append(check);
+    badge.classList.toggle('offline', !player.connected);
+    badge.setAttribute('aria-label', `${player.name}${player.id === state!.selfId ? ', you' : ''}, ${!player.connected ? 'offline' : player.readyChip !== null ? 'ready' : 'not ready'}`);
+    badge.title = badge.getAttribute('aria-label')!;
+    return badge;
+  }));
   el('hand-label').textContent = self ? finished ? 'YOUR REVEALED HAND' : 'YOUR PRIVATE HAND' : 'SPECTATOR';
   el('spectating').hidden = !!self;
   el<HTMLButtonElement>('sit').hidden = !state.canSit;
@@ -132,9 +146,12 @@ camera.position.set(0, 22, 26.2); camera.lookAt(0, 0, 0);
 scene.add(new THREE.HemisphereLight('#d5f8f1', '#14242c', 1.6));
 const light = new THREE.DirectionalLight('#fff3d6', 2.0); light.position.set(-5, 14, 6); light.castShadow = true;
 light.shadow.mapSize.set(2048, 2048); light.shadow.camera.left = -9; light.shadow.camera.right = 9; light.shadow.camera.top = 9; light.shadow.camera.bottom = -9; light.shadow.normalBias = .04; scene.add(light);
-const table = new THREE.Mesh(new THREE.CylinderGeometry(6.6, 6.5, .38, 96), new THREE.MeshStandardMaterial({ color: '#1c3036', roughness: .65 }));
+const table = new THREE.Mesh(new THREE.CylinderGeometry(6.6, 6.6, .38, 96), new THREE.MeshStandardMaterial({ color: '#493022', roughness: .75 }));
 table.position.y = -.3; table.receiveShadow = true; scene.add(table);
-const rail = new THREE.Mesh(new THREE.TorusGeometry(6.25, .2, 12, 96), new THREE.MeshStandardMaterial({ color: '#334e50', roughness: .6 })); rail.rotation.x = -Math.PI / 2; rail.position.y = -.05; scene.add(rail);
+const rimShape = new THREE.Shape(); rimShape.absarc(0, 0, 6.6, 0, Math.PI * 2, false);
+const rimHole = new THREE.Path(); rimHole.absarc(0, 0, 6.16, 0, Math.PI * 2, true); rimShape.holes.push(rimHole);
+const rail = new THREE.Mesh(new THREE.ExtrudeGeometry(rimShape, { depth: .22, bevelEnabled: false, curveSegments: 96 }), new THREE.MeshStandardMaterial({ color: '#795039', roughness: .7 }));
+rail.rotation.x = -Math.PI / 2; rail.position.y = -.16; rail.castShadow = true; rail.receiveShadow = true; scene.add(rail);
 const felt = new THREE.Mesh(new THREE.CircleGeometry(6.16, 96), new THREE.MeshStandardMaterial({ color: '#17413e', roughness: 1 })); felt.rotation.x = -Math.PI / 2; felt.position.y = -.08; felt.receiveShadow = true; scene.add(felt);
 const staticGroup = new THREE.Group(); scene.add(staticGroup);
 const chipGroup = new THREE.Group(); scene.add(chipGroup);
@@ -172,6 +189,32 @@ function tableCard(card?: string): THREE.Mesh {
   const texture = new THREE.CanvasTexture(surface); texture.colorSpace = THREE.SRGBColorSpace;
   const result = new THREE.Mesh(new THREE.PlaneGeometry(.65, .91), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false }));
   result.rotation.x = -Math.PI / 2; return result;
+}
+function controllerGlow(color: string) {
+  const group = new THREE.Group(); group.name = 'controller';
+  const surface = document.createElement('canvas'); surface.width = surface.height = 128;
+  const context = surface.getContext('2d')!;
+  const gradient = context.createRadialGradient(64, 64, 29, 64, 64, 64);
+  gradient.addColorStop(0, '#ffffff00'); gradient.addColorStop(.15, '#ffffffcc'); gradient.addColorStop(.45, '#ffffff55'); gradient.addColorStop(1, '#ffffff00');
+  context.fillStyle = gradient; context.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(surface); texture.colorSpace = THREE.SRGBColorSpace;
+  const halo = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 1.5), new THREE.MeshBasicMaterial({ map: texture, color, transparent: true, opacity: .5, depthWrite: false, blending: THREE.AdditiveBlending }));
+  halo.rotation.x = -Math.PI / 2; halo.position.y = .02; group.add(halo);
+  const rim = new THREE.Mesh(new THREE.RingGeometry(.37, .395, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .45, depthWrite: false }));
+  rim.rotation.x = -Math.PI / 2; rim.position.y = .078; group.add(rim);
+  return group;
+}
+function readyAreaGlow(color: string) {
+  const surface = document.createElement('canvas'); surface.width = surface.height = 256;
+  const context = surface.getContext('2d')!;
+  const gradient = context.createRadialGradient(128, 128, 0, 128, 128, 128);
+  gradient.addColorStop(0, '#ffffff00'); gradient.addColorStop(.7, '#ffffff00');
+  gradient.addColorStop(.85, '#ffffffaa'); gradient.addColorStop(1, '#ffffff00');
+  context.fillStyle = gradient; context.fillRect(0, 0, 256, 256);
+  const texture = new THREE.CanvasTexture(surface); texture.colorSpace = THREE.SRGBColorSpace;
+  const glow = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 2.6), new THREE.MeshBasicMaterial({ map: texture, color, transparent: true, opacity: .4, depthWrite: false, blending: THREE.AdditiveBlending }));
+  glow.rotation.x = -Math.PI / 2;
+  return glow;
 }
 function makeChip(id: number, stage: number, locked = false) {
   const group = new THREE.Group();
@@ -238,12 +281,12 @@ function updateScene(previous: Snapshot | null) {
       const i = player.seat;
       const point = seatPoint(i, state.players.length); const angle = i * Math.PI * 2 / state.players.length;
       const color = SEAT_COLORS[i % SEAT_COLORS.length];
-      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color: player.readyChip != null ? '#9af0ca' : color, transparent: true, opacity: .7, side: THREE.DoubleSide }));
+      const zone = new THREE.Mesh(new THREE.RingGeometry(1.10, 1.12, 64), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: player.readyChip != null ? .95 : .7, side: THREE.DoubleSide }));
       zone.rotation.x = -Math.PI / 2; zone.position.set(point.x, -.055, point.z); seatGroup.add(zone);
-      const inside = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), new THREE.MeshBasicMaterial({ color: player.readyChip != null ? '#83e5c1' : color, transparent: true, opacity: .045 })); inside.rotation.x = -Math.PI / 2; inside.position.set(point.x, -.06, point.z); seatGroup.add(inside);
-      const namePoint = seatPoint(i, state.players.length, 6.08);
-      const label = sprite(`${player.name}${player.id === state.selfId ? ' · YOU' : ''}${!player.connected ? ' · OFFLINE' : player.readyChip != null ? ' · ✓' : ''}`, player.connected ? '#e3ede5' : '#df9b94', 2.6, .6, '#18383ce8');
-      label.position.set(namePoint.x, .25, namePoint.z); seatGroup.add(label);
+      const inside = new THREE.Mesh(new THREE.CircleGeometry(1.1, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .045 })); inside.rotation.x = -Math.PI / 2; inside.position.set(point.x, -.06, point.z); seatGroup.add(inside);
+      if (player.readyChip != null) {
+        const glow = readyAreaGlow(color); glow.position.set(point.x, -.05, point.z); seatGroup.add(glow);
+      }
       player.history.forEach((id, stage) => {
         const history = makeChip(id, stage, true); const center = seatPoint(i, state!.players.length, 5.08); const offset = (stage - 1.5) * .5;
         history.position.set(center.x + Math.cos(angle) * offset, .1, center.z - Math.sin(angle) * offset);
@@ -283,7 +326,7 @@ function updateScene(previous: Snapshot | null) {
       if (old) { mesh.remove(old); const wrapper = new THREE.Group(); wrapper.add(old); disposeGroup(wrapper); }
       if (chip.holder) {
         const holder = state.players.find(p => p.id === chip.holder);
-        if (holder) { const marker = sprite(`● ${holder.name.slice(0, 10)}`, SEAT_COLORS[holder.seat % SEAT_COLORS.length], 1.25, .31, '#152d36ee'); marker.name = 'controller'; marker.position.y = .66; mesh.add(marker); }
+        if (holder) mesh.add(controllerGlow(SEAT_COLORS[holder.seat % SEAT_COLORS.length]));
       }
       mesh.userData.holder = chip.holder;
     }
@@ -344,10 +387,12 @@ function resize() {
   const { width, height } = canvas.getBoundingClientRect();
   renderer.setSize(width, height, false);
   const aspect = width / Math.max(height, 1);
-  const halfHeight = Math.max(7.5, 8.2 / aspect);
+  // With seat labels in the hand panel, frame the table itself more tightly.
+  const halfHeight = mobileTableLayout.matches ? Math.max(5.25, 7.2 / aspect) : Math.max(5.75, 7.2 / aspect);
   camera.left = -halfHeight * aspect; camera.right = halfHeight * aspect; camera.top = halfHeight; camera.bottom = -halfHeight; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvas); resize();
+mobileTableLayout.addEventListener('change', resize);
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let lastFrame = performance.now();
 function animate(now: number) {

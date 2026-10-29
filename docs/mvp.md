@@ -26,7 +26,7 @@
 - Stage completion requires everyone ready and no active drag. Players may confirm readiness while a chip is being held in their area.
 - Readiness confirms a specific chip. Replacing it clears readiness even if the area never appears empty.
 - Chips follow the pointer or finger directly on the table, without momentum, bouncing, or pushing other chips. Overlap is allowed. Physics may be explored separately later.
-- During a drag, the chip lifts slightly and displays a compact seat-colored marker identifying its controller. Keep this separate from the chip's stage color and avoid visual clutter.
+- During a drag, the chip lifts slightly and glows in its controller’s seat color. Keep this separate from the chip's stage color and avoid visual clutter.
 - Each seat displays its Ready status. Players can withdraw their own confirmation without moving a chip.
 
 ## Visual direction

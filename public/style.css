@@ -67,3 +67,36 @@ header,footer,.hand-panel,.action-panel,.instruction{min-width:0}
   .card span{font-size:18px;margin-top:2px}
   .action-panel button{min-height:30px;padding:6px}
 }
+
+.private-panel{display:flex;align-items:center;gap:18px;min-width:0;max-width:55%}
+.player-chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;min-width:0;width:clamp(200px,22vw,340px);max-width:100%;flex:1}
+.player-chip{display:grid;grid-template-columns:1em minmax(0,1fr) 1em;align-items:center;gap:4px;min-width:0;min-height:32px;padding:6px 10px;border-radius:9px;background:var(--player-color);color:#192a30;border:1px solid transparent;font-size:13px;font-weight:650;line-height:1.2}
+.player-name{grid-column:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
+.player-ready{grid-column:3;text-align:center}
+.player-chip.offline{opacity:.5;border-style:dashed;border-color:#192a30}
+@media(max-width:800px){
+  .private-panel{max-width:58%;gap:8px}
+  .player-chips{gap:3px}
+  .player-chip{font-size:12px;min-height:30px;padding:5px 6px;gap:3px}
+  .private-panel .hand-panel{min-width:0}
+}
+@media(orientation:portrait) and (max-width:600px){
+  .private-panel{flex-direction:column;align-items:flex-start;max-width:55%;gap:6px}
+  .private-panel .hand-panel{flex-direction:row}
+  .private-panel .hand-panel>.eyebrow{display:none}
+  .player-chips{width:100%}
+}
+@media (orientation:landscape) and (max-height:700px) and (max-width:1100px), (orientation:landscape) and (max-height:700px) and (pointer:coarse){
+  .private-panel{flex-direction:column;align-items:stretch;max-width:none;gap:8px;flex-shrink:0}
+  .player-chips{width:100%;max-width:none;gap:5px}
+  .player-chip{font-size:12px;min-height:30px;padding:5px 6px}
+  footer{gap:8px}
+  .instruction{display:none}
+}
+@media (orientation:landscape) and (max-height:400px){
+  .private-panel{gap:5px}
+  .player-chip{font-size:10px;min-height:24px;padding:4px 5px}
+  .player-chips{gap:2px}
+  .private-panel .hand-panel{flex-direction:row;align-items:center}
+  .private-panel .hand-panel>.eyebrow{max-width:55px;font-size:7px}
+}
