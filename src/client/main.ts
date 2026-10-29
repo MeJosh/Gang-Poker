@@ -184,7 +184,8 @@ function makeChip(id: number, stage: number, locked = false) {
   const numberContext = numberCanvas.getContext('2d')!;
   numberContext.fillStyle = '#203239'; numberContext.font = 'bold 88px system-ui'; numberContext.textAlign = 'center'; numberContext.textBaseline = 'middle'; numberContext.fillText(String(id), 64, 66, 118);
   const numberTexture = new THREE.CanvasTexture(numberCanvas); numberTexture.colorSpace = THREE.SRGBColorSpace;
-  const number = new THREE.Sprite(new THREE.SpriteMaterial({ map: numberTexture, depthTest: false })); number.scale.set(.43, .43, 1); number.position.y = .18; group.add(number);
+  const number = new THREE.Mesh(new THREE.PlaneGeometry(.43, .43), new THREE.MeshBasicMaterial({ map: numberTexture, transparent: true, depthTest: true, depthWrite: false }));
+  number.position.y = .077; number.rotation.set(-Math.PI / 2, 0, viewAngle); number.userData.chipNumber = true; group.add(number);
   if (!locked) {
     const hit = new THREE.Mesh(new THREE.SphereGeometry(.49, 10, 8), new THREE.MeshBasicMaterial({ visible: false })); hit.userData.chipId = id; group.add(hit);
   } else group.scale.setScalar(.65);
@@ -391,6 +392,10 @@ function animate(now: number) {
     const destination = object.userData.destination as THREE.Vector3 | undefined;
     if (destination) { object.position.lerp(destination, blend * .55); object.scale.lerp(new THREE.Vector3(.65, .65, .65), blend * .55); }
   }
+  // Numbers sit on the chip face, but stay readable from the viewing seat.
+  for (const group of [chipGroup, staticGroup]) group.traverse(object => {
+    if (object.userData.chipNumber) object.rotation.set(-Math.PI / 2, 0, viewAngle);
+  });
   renderer.render(scene, camera); requestAnimationFrame(animate);
 }
 requestAnimationFrame(animate);
